@@ -3290,6 +3290,21 @@ pub struct SkillsListResponse {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
+pub struct MarketplaceRemoveParams {
+    pub marketplace_name: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct MarketplaceRemoveResponse {
+    pub marketplace_name: String,
+    pub installed_root: Option<AbsolutePathBuf>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
 pub struct PluginListParams {
     /// Optional working directories used to discover repo marketplaces. When omitted,
     /// only home-scoped marketplaces and the official curated marketplace are considered.
@@ -8356,6 +8371,34 @@ mod tests {
             json!({
                 "pluginId": "gmail@openai-curated",
                 "forceRemoteSync": true,
+            }),
+        );
+    }
+
+    #[test]
+    fn marketplace_remove_response_serializes_nullable_installed_root() {
+        let installed_root = AbsolutePathBuf::parse("/tmp/marketplaces/debug").unwrap();
+        assert_eq!(
+            serde_json::to_value(MarketplaceRemoveResponse {
+                marketplace_name: "debug".to_string(),
+                installed_root: Some(installed_root),
+            })
+            .unwrap(),
+            json!({
+                "marketplaceName": "debug",
+                "installedRoot": "/tmp/marketplaces/debug",
+            }),
+        );
+
+        assert_eq!(
+            serde_json::to_value(MarketplaceRemoveResponse {
+                marketplace_name: "debug".to_string(),
+                installed_root: None,
+            })
+            .unwrap(),
+            json!({
+                "marketplaceName": "debug",
+                "installedRoot": null,
             }),
         );
     }

@@ -151,6 +151,8 @@ export type { LoginAccountResponse } from "./LoginAccountResponse";
 export type { LogoutAccountResponse } from "./LogoutAccountResponse";
 export type { MarketplaceInterface } from "./MarketplaceInterface";
 export type { MarketplaceLoadErrorInfo } from "./MarketplaceLoadErrorInfo";
+export type { MarketplaceRemoveParams } from "./MarketplaceRemoveParams";
+export type { MarketplaceRemoveResponse } from "./MarketplaceRemoveResponse";
 export type { McpAuthStatus } from "./McpAuthStatus";
 export type { McpElicitationArrayType } from "./McpElicitationArrayType";
 export type { McpElicitationBooleanSchema } from "./McpElicitationBooleanSchema";

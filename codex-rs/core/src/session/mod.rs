@@ -109,6 +109,7 @@ use codex_protocol::request_permissions::RequestPermissionsEvent;
 use codex_protocol::request_permissions::RequestPermissionsResponse;
 use codex_protocol::request_user_input::RequestUserInputArgs;
 use codex_protocol::request_user_input::RequestUserInputResponse;
+use codex_rmcp_client::ChannelNotification;
 use codex_rmcp_client::ElicitationResponse;
 use codex_rollout::RolloutConfig;
 use codex_rollout::state_db;
@@ -1075,6 +1076,61 @@ impl Session {
             Op::UserInput {
                 items: vec![UserInput::Text {
                     text,
+                    text_elements: Vec::new(),
+                }],
+                final_output_json_schema: None,
+                responsesapi_client_metadata: None,
+            },
+            /*mirror_user_text_to_realtime*/ None,
+        )
+        .await;
+    }
+
+    pub(crate) fn start_mcp_channel_forwarder(
+        self: &Arc<Self>,
+        mut rx: tokio::sync::mpsc::UnboundedReceiver<ChannelNotification>,
+    ) {
+        let sess = Arc::clone(self);
+        tokio::spawn(async move {
+            let mut seq: u64 = 0;
+            while let Some(notif) = rx.recv().await {
+                seq += 1;
+                sess.route_mcp_channel_notification(format!("channel-{seq}"), notif)
+                    .await;
+            }
+        });
+    }
+
+    async fn route_mcp_channel_notification(
+        self: &Arc<Self>,
+        sub_id: String,
+        notif: ChannelNotification,
+    ) {
+        let source = notif
+            .meta
+            .get("chat_id")
+            .and_then(|value| value.as_str())
+            .unwrap_or("channel");
+        let from = notif
+            .meta
+            .get("from")
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown");
+        let ts = notif
+            .meta
+            .get("ts")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let wrapped = format!(
+            "<channel source=\"{source}\" chat_id=\"{source}\" from=\"{from}\" ts=\"{ts}\">{}</channel>",
+            notif.content
+        );
+        handlers::user_input_or_turn_inner(
+            self,
+            sub_id,
+            Op::UserInput {
+                items: vec![UserInput::Text {
+                    text: wrapped,
                     text_elements: Vec::new(),
                 }],
                 final_output_json_schema: None,

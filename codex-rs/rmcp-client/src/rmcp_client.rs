@@ -563,11 +563,13 @@ impl RmcpClient {
         params: InitializeRequestParams,
         timeout: Option<Duration>,
         send_elicitation: SendElicitation,
+        channel_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::ChannelNotification>>,
     ) -> Result<InitializeResult> {
         let client_service = ElicitationClientService::new(
             params.clone(),
             send_elicitation,
             self.elicitation_pause_state.clone(),
+            channel_tx,
         );
         let pending_transport = {
             let mut guard = self.state.lock().await;

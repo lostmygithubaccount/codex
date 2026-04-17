@@ -175,7 +175,7 @@ impl Session {
     }
 
     async fn refresh_mcp_servers_inner(
-        &self,
+        self: &Arc<Self>,
         turn_context: &TurnContext,
         mcp_servers: HashMap<String, McpServerConfig>,
         store_mode: OAuthCredentialsStoreMode,
@@ -197,7 +197,7 @@ impl Session {
             guard.cancel();
             *guard = CancellationToken::new();
         }
-        let (refreshed_manager, cancel_token) = McpConnectionManager::new(
+        let (mut refreshed_manager, cancel_token) = McpConnectionManager::new(
             &mcp_servers,
             store_mode,
             auth_statuses,
@@ -217,6 +217,9 @@ impl Session {
             tool_plugin_provenance,
         )
         .await;
+        if let Some(rx) = refreshed_manager.take_channel_rx() {
+            self.start_mcp_channel_forwarder(rx);
+        }
         {
             let mut guard = self.services.mcp_startup_cancellation_token.lock().await;
             if guard.is_cancelled() {
@@ -229,7 +232,10 @@ impl Session {
         *manager = refreshed_manager;
     }
 
-    pub(crate) async fn refresh_mcp_servers_if_requested(&self, turn_context: &TurnContext) {
+    pub(crate) async fn refresh_mcp_servers_if_requested(
+        self: &Arc<Self>,
+        turn_context: &TurnContext,
+    ) {
         let refresh_config = { self.pending_mcp_server_refresh_config.lock().await.take() };
         let Some(refresh_config) = refresh_config else {
             return;
@@ -263,7 +269,7 @@ impl Session {
     }
 
     pub(crate) async fn refresh_mcp_servers_now(
-        &self,
+        self: &Arc<Self>,
         turn_context: &TurnContext,
         mcp_servers: HashMap<String, McpServerConfig>,
         store_mode: OAuthCredentialsStoreMode,

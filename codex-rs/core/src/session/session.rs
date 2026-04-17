@@ -764,7 +764,7 @@ impl Session {
             cancel_guard.cancel();
             *cancel_guard = CancellationToken::new();
         }
-        let (mcp_connection_manager, cancel_token) = McpConnectionManager::new(
+        let (mut mcp_connection_manager, cancel_token) = McpConnectionManager::new(
             &mcp_servers,
             config.mcp_oauth_credentials_store_mode,
             auth_statuses.clone(),
@@ -789,6 +789,9 @@ impl Session {
             session_init.required_mcp_server_count = required_mcp_server_count,
         ))
         .await;
+        if let Some(rx) = mcp_connection_manager.take_channel_rx() {
+            sess.start_mcp_channel_forwarder(rx);
+        }
         {
             let mut manager_guard = sess.services.mcp_connection_manager.write().await;
             *manager_guard = mcp_connection_manager;

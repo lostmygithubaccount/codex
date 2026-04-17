@@ -6,12 +6,14 @@ use rmcp::model::CancelledNotificationParam;
 use rmcp::model::ClientInfo;
 use rmcp::model::CreateElicitationRequestParams;
 use rmcp::model::CreateElicitationResult;
+use rmcp::model::CustomNotification;
 use rmcp::model::LoggingLevel;
 use rmcp::model::LoggingMessageNotificationParam;
 use rmcp::model::ProgressNotificationParam;
 use rmcp::model::ResourceUpdatedNotificationParam;
 use rmcp::service::NotificationContext;
 use rmcp::service::RequestContext;
+use tokio::sync::mpsc;
 use tracing::debug;
 use tracing::error;
 use tracing::info;
@@ -19,17 +21,31 @@ use tracing::warn;
 
 use crate::rmcp_client::SendElicitation;
 
+const CHANNEL_NOTIFICATION_METHOD: &str = "notifications/claude/channel";
+
+#[derive(Debug, Clone)]
+pub struct ChannelNotification {
+    pub content: String,
+    pub meta: serde_json::Value,
+}
+
 #[derive(Clone)]
 pub(crate) struct LoggingClientHandler {
     client_info: ClientInfo,
     send_elicitation: Arc<SendElicitation>,
+    channel_tx: Option<mpsc::UnboundedSender<ChannelNotification>>,
 }
 
 impl LoggingClientHandler {
-    pub(crate) fn new(client_info: ClientInfo, send_elicitation: SendElicitation) -> Self {
+    pub(crate) fn new(
+        client_info: ClientInfo,
+        send_elicitation: SendElicitation,
+        channel_tx: Option<mpsc::UnboundedSender<ChannelNotification>>,
+    ) -> Self {
         Self {
             client_info,
             send_elicitation: Arc::new(send_elicitation),
+            channel_tx,
         }
     }
 }
@@ -131,6 +147,36 @@ impl ClientHandler for LoggingClientHandler {
                     level, logger, data
                 );
             }
+        }
+    }
+
+    async fn on_custom_notification(
+        &self,
+        notification: CustomNotification,
+        _context: NotificationContext<RoleClient>,
+    ) {
+        if notification.method != CHANNEL_NOTIFICATION_METHOD {
+            debug!(
+                method = %notification.method,
+                "ignoring unknown custom notification"
+            );
+            return;
+        }
+        let Some(params) = notification.params else {
+            warn!("channel notification missing params");
+            return;
+        };
+        let content = params
+            .get("content")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string();
+        let meta = params
+            .get("meta")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        if let Some(tx) = &self.channel_tx {
+            let _ = tx.send(ChannelNotification { content, meta });
         }
     }
 }

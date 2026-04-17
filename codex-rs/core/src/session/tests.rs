@@ -4570,6 +4570,7 @@ fn fake_id_token(account_id: &str, user_id: Option<&str>) -> String {
 #[tokio::test]
 async fn refresh_mcp_servers_is_deferred_until_next_turn() {
     let (session, turn_context) = make_session_and_context().await;
+    let session = Arc::new(session);
     let old_token = session.mcp_startup_cancellation_token().await;
     assert!(!old_token.is_cancelled());
 

@@ -496,6 +496,7 @@ impl AsyncManagedClient {
         codex_apps_tools_cache_context: Option<CodexAppsToolsCacheContext>,
         tool_plugin_provenance: Arc<ToolPluginProvenance>,
         runtime_environment: McpRuntimeEnvironment,
+        channel_tx: Option<tokio::sync::mpsc::UnboundedSender<codex_rmcp_client::ChannelNotification>>,
     ) -> Self {
         let tool_filter = ToolFilter::from_config(&config);
         let startup_snapshot = load_startup_cached_codex_apps_tools_snapshot(
@@ -533,6 +534,7 @@ impl AsyncManagedClient {
                         tx_event,
                         elicitation_requests,
                         codex_apps_tools_cache_context,
+                        channel_tx,
                     },
                 )
                 .or_cancel(&cancel_token)
@@ -658,6 +660,7 @@ pub struct McpConnectionManager {
     clients: HashMap<String, AsyncManagedClient>,
     server_origins: HashMap<String, String>,
     elicitation_requests: ElicitationRequestManager,
+    channel_rx: Option<tokio::sync::mpsc::UnboundedReceiver<codex_rmcp_client::ChannelNotification>>,
 }
 
 /// Runtime placement information used when starting MCP server transports.
@@ -719,7 +722,14 @@ impl McpConnectionManager {
                 approval_policy.value(),
                 sandbox_policy.get().clone(),
             ),
+            channel_rx: None,
         }
+    }
+
+    pub fn take_channel_rx(
+        &mut self,
+    ) -> Option<tokio::sync::mpsc::UnboundedReceiver<codex_rmcp_client::ChannelNotification>> {
+        self.channel_rx.take()
     }
 
     pub fn has_servers(&self) -> bool {
@@ -762,6 +772,8 @@ impl McpConnectionManager {
         let mut join_set = JoinSet::new();
         let elicitation_requests =
             ElicitationRequestManager::new(approval_policy.value(), initial_sandbox_policy);
+        let (channel_tx, channel_rx) =
+            tokio::sync::mpsc::unbounded_channel::<codex_rmcp_client::ChannelNotification>();
         let tool_plugin_provenance = Arc::new(tool_plugin_provenance);
         let startup_submit_id = submit_id.clone();
         let mcp_servers = mcp_servers.clone();
@@ -797,6 +809,7 @@ impl McpConnectionManager {
                 codex_apps_tools_cache_context,
                 Arc::clone(&tool_plugin_provenance),
                 runtime_environment.clone(),
+                Some(channel_tx.clone()),
             );
             clients.insert(server_name.clone(), async_managed_client.clone());
             let tx_event = tx_event.clone();
@@ -837,6 +850,7 @@ impl McpConnectionManager {
             clients,
             server_origins,
             elicitation_requests: elicitation_requests.clone(),
+            channel_rx: Some(channel_rx),
         };
         tokio::spawn(async move {
             let outcomes = join_set.join_all().await;
@@ -1438,6 +1452,7 @@ async fn start_server_task(
         tx_event,
         elicitation_requests,
         codex_apps_tools_cache_context,
+        channel_tx,
     } = params;
     let elicitation = elicitation_capability_for_server(&server_name);
     let params = InitializeRequestParams {
@@ -1464,7 +1479,7 @@ async fn start_server_task(
     let send_elicitation = elicitation_requests.make_sender(server_name.clone(), tx_event);
 
     let initialize_result = client
-        .initialize(params, startup_timeout, send_elicitation)
+        .initialize(params, startup_timeout, send_elicitation, channel_tx)
         .await
         .map_err(StartupOutcomeError::from)?;
 
@@ -1523,6 +1538,7 @@ struct StartServerTaskParams {
     tx_event: Sender<Event>,
     elicitation_requests: ElicitationRequestManager,
     codex_apps_tools_cache_context: Option<CodexAppsToolsCacheContext>,
+    channel_tx: Option<tokio::sync::mpsc::UnboundedSender<codex_rmcp_client::ChannelNotification>>,
 }
 
 async fn make_rmcp_client(

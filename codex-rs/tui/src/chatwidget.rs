@@ -2489,6 +2489,17 @@ impl ChatWidget {
                 }
             })
             .unwrap_or_default();
+        if !from_replay {
+            // Terminal reply envelope for the channel subscriber.
+            // Empty text marks a tool-call-only turn with no closing prose;
+            // no terminal channel envelope is emitted for that turn.
+            let reply_text = if notification_response.is_empty() {
+                None
+            } else {
+                Some(notification_response.clone())
+            };
+            crate::channel::record_turn_complete(reply_text);
+        }
         self.saw_copy_source_this_turn = false;
         // If a stream is currently active, finalize it.
         self.flush_answer_stream_with_separator();
@@ -6660,13 +6671,17 @@ impl ChatWidget {
         notification: TurnCompletedNotification,
         replay_kind: Option<ReplayKind>,
     ) {
+        let from_replay = replay_kind.is_some();
         match notification.turn.status {
             TurnStatus::Completed => {
                 self.last_non_retry_error = None;
-                self.on_task_complete(/*last_agent_message*/ None, replay_kind.is_some())
+                self.on_task_complete(/*last_agent_message*/ None, from_replay)
             }
             TurnStatus::Interrupted => {
                 self.last_non_retry_error = None;
+                if !from_replay {
+                    crate::channel::record_turn_aborted("interrupted");
+                }
                 self.on_interrupted_turn(TurnAbortReason::Interrupted);
             }
             TurnStatus::Failed => {
@@ -6676,6 +6691,9 @@ impl ChatWidget {
                     {
                         self.last_non_retry_error = None;
                     } else {
+                        if !from_replay {
+                            crate::channel::record_turn_error(error.message.clone());
+                        }
                         self.handle_non_retry_error(error.message, error.codex_error_info);
                     }
                 } else {

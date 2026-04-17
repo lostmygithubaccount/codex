@@ -131,6 +131,7 @@ mod key_hint;
 mod line_truncation;
 pub(crate) mod live_wrap;
 pub use live_wrap::RowBuilder;
+mod channel;
 mod local_chatgpt_auth;
 mod markdown;
 mod markdown_render;

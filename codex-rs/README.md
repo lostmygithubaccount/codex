@@ -48,6 +48,23 @@ Use `codex mcp` to add/list/get/remove MCP server launchers defined in `config.t
 
 You can enable notifications by configuring a script that is run whenever the agent finishes a turn. The [notify documentation](../docs/config.md#notify) includes a detailed example that explains how to get desktop notifications via [terminal-notifier](https://github.com/julienXX/terminal-notifier) on macOS. When Codex detects that it is running under WSL 2 inside Windows Terminal (`WT_SESSION` is set), the TUI automatically falls back to native Windows toast notifications so approval prompts and completed turns surface even though Windows Terminal does not implement OSC 9.
 
+### External channels
+
+Codex can accept turns from external sources and emit replies back to them. A channel is a subscribable source (filesystem, MCP, HTTP, iroh, ...) that delivers a turn to the session and receives the completed assistant message as a terminal envelope. This is wire-compatible with Claude Code's `experimental.claude/channel` capability so the same MCP channel server works against either runtime.
+
+Enable via `~/.codex/config.toml`:
+
+```toml
+[[channels]]
+name = "local"
+kind = "filesystem"
+path = "/tmp/codex-channel"
+```
+
+An external producer drops a json envelope into `<path>/inbox/`; codex archives it to `<path>/processed/` after submit and writes a terminal reply envelope into `<path>/outbox/`.
+
+See [`docs/channel.md`](docs/channel.md) for the config reference, envelope schema, delivery semantics, MCP interop details, and the instructions for implementing a custom channel source. A demo is available at [`scripts/demo-channel.sh`](scripts/demo-channel.sh).
+
 ### `codex exec` to run Codex programmatically/non-interactively
 
 To run Codex non-interactively, run `codex exec PROMPT` (you can also pass the prompt via `stdin`) and Codex will work on your task until it decides that it is done and exits. If you provide both a prompt argument and piped stdin, Codex appends stdin as a `<stdin>` block after the prompt so patterns like `echo "my output" | codex exec "Summarize this concisely"` work naturally. Output is printed to the terminal directly. You can set the `RUST_LOG` environment variable to see more about what's going on.

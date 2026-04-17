@@ -19,6 +19,29 @@ Keep `main` ahead of upstream with a clean linear stack. Rebase onto
 `upstream/main` when upstream moves. Push with `--force-with-lease`,
 not `--force`.
 
+### Intended tracking target
+
+Long-term, this fork should track upstream stable release tags
+(`rust-vX.Y.0`, no `-alpha.N`) rather than `upstream/main`. A tagged
+release is a stable surface; `main` can carry mid-refactor state that
+breaks our rebase unpredictably.
+
+The switch cannot happen today. Our `feat(mcp): channel notification
+support` commit touches files added by the upstream "Move codex module
+under session" refactor on 2026-04-17 (`session/mod.rs`,
+`session/session.rs`, `session/turn.rs`). No release tag contains those
+files yet — the latest stable is `rust-v0.121.0`.
+
+When upstream cuts a release after the session refactor (expected
+`rust-v0.122.0` or later), flip the policy:
+
+1. Find the newest `rust-vX.Y.0` (strictly no alpha) whose tree contains
+   `codex-rs/core/src/session/session.rs`.
+2. `git reset --hard <tag>` on `main`, `git cherry-pick` the fork
+   commits on top, `--force-with-lease` push.
+3. Update this section to list the pinned tag and replace "rebase onto
+   `upstream/main`" with "rebase onto the next stable `rust-vX.Y.0`."
+
 ## Upstream posture
 
 Each fork commit should be reviewable as an upstream Codex change:

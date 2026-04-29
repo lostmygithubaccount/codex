@@ -18,6 +18,7 @@ use crate::compact::should_use_remote_compact_task;
 use crate::compact_remote::run_inline_remote_auto_compact_task;
 use crate::connectors;
 use crate::context::ContextualUserFragment;
+use crate::context_manager::estimate_response_item_model_visible_bytes;
 use crate::feedback_tags;
 use crate::hook_runtime::PendingInputHookDisposition;
 use crate::hook_runtime::emit_hook_completed_events;
@@ -97,6 +98,7 @@ use codex_protocol::protocol::WarningEvent;
 use codex_protocol::user_input::UserInput;
 use codex_tools::ToolName;
 use codex_tools::filter_tool_suggest_discoverable_tools_for_client;
+use codex_utils_output_truncation::approx_tokens_from_byte_count_i64;
 use codex_utils_stream_parser::AssistantTextChunk;
 use codex_utils_stream_parser::AssistantTextStreamParser;
 use codex_utils_stream_parser::ProposedPlanSegment;
@@ -147,17 +149,23 @@ pub(crate) async fn run_turn(
     let model_info = turn_context.model_info.clone();
     let auto_compact_limit = model_info.auto_compact_token_limit().unwrap_or(i64::MAX);
     let mut prewarmed_client_session = prewarmed_client_session;
-    // TODO(ccunningham): Pre-turn compaction runs before context updates and the
-    // new user message are recorded. Estimate pending incoming items (context
-    // diffs/full reinjection + user input) and trigger compaction preemptively
-    // when they would push the thread over the compaction threshold.
-    let pre_sampling_compacted = match run_pre_sampling_compact(&sess, &turn_context).await {
-        Ok(pre_sampling_compacted) => pre_sampling_compacted,
-        Err(_) => {
-            error!("Failed to run pre-sampling compact");
-            return None;
-        }
+    let pending_input_tokens = if input.is_empty() {
+        0
+    } else {
+        let input_item: ResponseInputItem = ResponseInputItem::from(input.clone());
+        let response_item: ResponseItem = input_item.into();
+        approx_tokens_from_byte_count_i64(estimate_response_item_model_visible_bytes(
+            &response_item,
+        ))
     };
+    let pre_sampling_compacted =
+        match run_pre_sampling_compact(&sess, &turn_context, pending_input_tokens).await {
+            Ok(pre_sampling_compacted) => pre_sampling_compacted,
+            Err(_) => {
+                error!("Failed to run pre-sampling compact");
+                return None;
+            }
+        };
     if pre_sampling_compacted && let Some(mut client_session) = prewarmed_client_session.take() {
         client_session.reset_websocket_session();
     }
@@ -702,6 +710,7 @@ async fn track_turn_resolved_config_analytics(
 async fn run_pre_sampling_compact(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
+    pending_input_tokens: i64,
 ) -> CodexResult<bool> {
     let total_usage_tokens_before_compaction = sess.get_total_token_usage().await;
     let mut pre_sampling_compacted = maybe_run_previous_model_inline_compact(
@@ -710,7 +719,10 @@ async fn run_pre_sampling_compact(
         total_usage_tokens_before_compaction,
     )
     .await?;
-    let total_usage_tokens = sess.get_total_token_usage().await;
+    let total_usage_tokens = sess
+        .get_total_token_usage()
+        .await
+        .saturating_add(pending_input_tokens);
     let auto_compact_limit = turn_context
         .model_info
         .auto_compact_token_limit()

@@ -21,6 +21,7 @@ const LOCAL_PRAGMATIC_TEMPLATE: &str = "You are a deeply pragmatic, effective so
 const PERSONALITY_PLACEHOLDER: &str = "{{ personality }}";
 
 pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig) -> ModelInfo {
+    normalize_known_context_limits(&mut model);
     if let Some(supports_reasoning_summaries) = config.model_supports_reasoning_summaries
         && supports_reasoning_summaries
     {
@@ -60,6 +61,38 @@ pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig)
     }
 
     model
+}
+
+fn normalize_known_context_limits(model: &mut ModelInfo) {
+    let Some(known_context_window) = known_max_context_window(&model.slug) else {
+        return;
+    };
+
+    model.context_window = Some(
+        model
+            .context_window
+            .map_or(known_context_window, |context_window| {
+                context_window.max(known_context_window)
+            }),
+    );
+    model.max_context_window = Some(
+        model
+            .max_context_window
+            .map_or(known_context_window, |max_context_window| {
+                max_context_window.max(known_context_window)
+            }),
+    );
+}
+
+fn known_max_context_window(slug: &str) -> Option<i64> {
+    let slug = slug.rsplit('/').next().unwrap_or(slug);
+    if slug == "gpt-5.5-pro" {
+        return Some(1_050_000);
+    }
+    if slug == "gpt-5.5" || slug.starts_with("gpt-5.5-") {
+        return Some(1_000_000);
+    }
+    None
 }
 
 /// Build a minimal fallback model descriptor for missing/unknown slugs.

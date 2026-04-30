@@ -72,3 +72,85 @@ fn model_context_window_uses_model_value_without_override() {
 
     assert_eq!(updated, model);
 }
+
+#[test]
+fn gpt_5_5_context_window_override_ignores_stale_remote_maximum() {
+    let mut model = model_info_from_slug("gpt-5.5");
+    model.context_window = Some(272_000);
+    model.max_context_window = Some(272_000);
+    let config = ModelsManagerConfig {
+        model_context_window: Some(1_000_000),
+        ..Default::default()
+    };
+
+    let updated = with_config_overrides(model.clone(), &config);
+    let mut expected = model;
+    expected.context_window = Some(1_000_000);
+    expected.max_context_window = Some(1_000_000);
+
+    assert_eq!(updated, expected);
+}
+
+#[test]
+fn gpt_5_5_default_context_window_ignores_stale_remote_metadata() {
+    let mut model = model_info_from_slug("gpt-5.5");
+    model.context_window = Some(272_000);
+    model.max_context_window = Some(272_000);
+
+    let updated = with_config_overrides(model.clone(), &ModelsManagerConfig::default());
+    let mut expected = model;
+    expected.context_window = Some(1_000_000);
+    expected.max_context_window = Some(1_000_000);
+
+    assert_eq!(updated, expected);
+}
+
+#[test]
+fn gpt_5_5_pro_default_context_window_uses_pro_limit() {
+    let mut model = model_info_from_slug("gpt-5.5-pro");
+    model.context_window = Some(272_000);
+    model.max_context_window = Some(272_000);
+
+    let updated = with_config_overrides(model.clone(), &ModelsManagerConfig::default());
+    let mut expected = model;
+    expected.context_window = Some(1_050_000);
+    expected.max_context_window = Some(1_050_000);
+
+    assert_eq!(updated, expected);
+}
+
+#[test]
+fn gpt_5_5_context_window_override_clamps_to_known_model_limit() {
+    let mut model = model_info_from_slug("gpt-5.5");
+    model.context_window = Some(272_000);
+    model.max_context_window = Some(272_000);
+    let config = ModelsManagerConfig {
+        model_context_window: Some(1_050_000),
+        ..Default::default()
+    };
+
+    let updated = with_config_overrides(model.clone(), &config);
+    let mut expected = model;
+    expected.context_window = Some(1_000_000);
+    expected.max_context_window = Some(1_000_000);
+
+    assert_eq!(updated, expected);
+}
+
+#[test]
+fn gpt_5_5_pro_context_window_override_allows_pro_limit() {
+    let mut model = model_info_from_slug("gpt-5.5-pro");
+    model.context_window = Some(272_000);
+    model.max_context_window = Some(272_000);
+    let config = ModelsManagerConfig {
+        model_context_window: Some(1_050_000),
+        ..Default::default()
+    };
+
+    let updated = with_config_overrides(model.clone(), &config);
+    let mut expected = model;
+    expected.context_window = Some(1_050_000);
+    expected.max_context_window = Some(1_050_000);
+
+    assert_eq!(updated, expected);
+}

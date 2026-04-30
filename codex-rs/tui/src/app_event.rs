@@ -816,6 +816,11 @@ pub(crate) enum AppEvent {
         text: String,
         collaboration_mode: CollaborationModeMask,
     },
+    SubmitChannelUserMessage {
+        text: String,
+        collaboration_mode: CollaborationModeMask,
+        pending_reply: crate::channel::PendingReply,
+    },
 
     /// Open the approval popup.
     FullScreenApprovalRequest(ApprovalRequest),

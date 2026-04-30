@@ -6,7 +6,10 @@ use codex_utils_cli::CliConfigOverrides;
 use codex_utils_cli::SharedCliOptions;
 
 #[derive(Parser, Debug)]
-#[command(version)]
+#[command(version = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " [netsky fork https://github.com/lostmygithubaccount/codex]"
+))]
 pub struct Cli {
     /// Optional user prompt to start the session.
     #[arg(value_name = "PROMPT", value_hint = clap::ValueHint::Other)]

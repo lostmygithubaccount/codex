@@ -80,6 +80,10 @@ fn sanitize_directory(lines: Vec<String>) -> Vec<String> {
     lines
         .into_iter()
         .map(|line| {
+            let line = line.replace(
+                &format!("(v{})", crate::version::CODEX_CLI_VERSION),
+                "(v0.0.0)  ",
+            );
             if let (Some(dir_pos), Some(pipe_idx)) = (line.find("Directory: "), line.rfind('│')) {
                 let prefix = &line[..dir_pos + "Directory: ".len()];
                 let suffix = &line[pipe_idx..];

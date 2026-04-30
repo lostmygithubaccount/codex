@@ -1619,6 +1619,17 @@ impl App {
                 self.chat_widget
                     .submit_user_message_with_mode(text, collaboration_mode);
             }
+            AppEvent::SubmitChannelUserMessage {
+                text,
+                collaboration_mode,
+                pending_reply,
+            } => {
+                self.chat_widget.submit_channel_user_message_with_mode(
+                    text,
+                    collaboration_mode,
+                    pending_reply,
+                );
+            }
             AppEvent::ManageSkillsClosed => {
                 self.chat_widget.handle_manage_skills_closed();
             }

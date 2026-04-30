@@ -976,6 +976,8 @@ pub(crate) struct ChatWidget {
     // The bottom pane shows these above queued drafts until core records the
     // corresponding user message item.
     pending_steers: VecDeque<PendingSteer>,
+    // Pending filesystem channel reply metadata for the active channel turn.
+    pending_channel_reply: Option<crate::channel::PendingReply>,
     // When set, the next interrupt should resubmit all pending steers as one
     // fresh user turn instead of restoring them into the composer.
     submit_pending_steers_after_interrupt: bool,
@@ -2808,6 +2810,11 @@ impl ChatWidget {
                 }
             })
             .unwrap_or_default();
+        if !from_replay && let Some(pending_reply) = self.pending_channel_reply.take() {
+            let reply_text =
+                (!notification_response.is_empty()).then(|| notification_response.clone());
+            crate::channel::record_turn_complete(pending_reply, reply_text);
+        }
         self.saw_copy_source_this_turn = false;
         // If a stream is currently active, finalize it.
         self.flush_answer_stream_with_separator();
@@ -5388,6 +5395,7 @@ impl ChatWidget {
             rejected_steers_queue: VecDeque::new(),
             rejected_steer_history_records: VecDeque::new(),
             pending_steers: VecDeque::new(),
+            pending_channel_reply: None,
             submit_pending_steers_after_interrupt: false,
             chat_keymap,
             queued_message_edit_hint_binding,
@@ -7079,13 +7087,14 @@ impl ChatWidget {
         notification: TurnCompletedNotification,
         replay_kind: Option<ReplayKind>,
     ) {
+        let from_replay = replay_kind.is_some();
         match notification.turn.status {
             TurnStatus::Completed => {
                 self.last_non_retry_error = None;
                 self.on_task_complete(
                     /*last_agent_message*/ None,
                     notification.turn.duration_ms,
-                    replay_kind.is_some(),
+                    from_replay,
                 )
             }
             TurnStatus::Interrupted => {
@@ -7098,6 +7107,15 @@ impl ChatWidget {
                 } else {
                     TurnAbortReason::Interrupted
                 };
+                if !from_replay && let Some(pending_reply) = self.pending_channel_reply.take() {
+                    let channel_reason = match reason {
+                        TurnAbortReason::Interrupted => "interrupted",
+                        TurnAbortReason::Replaced => "replaced",
+                        TurnAbortReason::ReviewEnded => "review_ended",
+                        TurnAbortReason::BudgetLimited => "budget_limited",
+                    };
+                    crate::channel::record_turn_aborted(pending_reply, channel_reason);
+                }
                 self.on_interrupted_turn(reason);
             }
             TurnStatus::Failed => {
@@ -7107,6 +7125,11 @@ impl ChatWidget {
                     {
                         self.last_non_retry_error = None;
                     } else {
+                        if !from_replay
+                            && let Some(pending_reply) = self.pending_channel_reply.take()
+                        {
+                            crate::channel::record_turn_error(pending_reply, error.message.clone());
+                        }
                         self.handle_non_retry_error(error.message, error.codex_error_info);
                     }
                 } else {
@@ -11440,6 +11463,34 @@ impl ChatWidget {
             self.queue_user_message(user_message);
         } else {
             self.submit_user_message(user_message);
+        }
+    }
+
+    pub(crate) fn submit_channel_user_message_with_mode(
+        &mut self,
+        text: String,
+        collaboration_mode: CollaborationModeMask,
+        pending_reply: crate::channel::PendingReply,
+    ) {
+        if self.agent_turn_running
+            || self.user_turn_pending_start
+            || self.is_plan_streaming_in_tui()
+        {
+            crate::channel::record_submission_rejected(
+                pending_reply,
+                "codex is busy with another turn",
+            );
+            return;
+        }
+
+        self.pending_channel_reply = Some(pending_reply.clone());
+        self.submit_user_message_with_mode(text, collaboration_mode);
+        if self.pending_channel_reply.is_some() && !self.user_turn_pending_start {
+            self.pending_channel_reply = None;
+            crate::channel::record_submission_rejected(
+                pending_reply,
+                "channel message was not submitted",
+            );
         }
     }
 

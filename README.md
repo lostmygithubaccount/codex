@@ -28,6 +28,9 @@ brew install --cask codex
 
 Then simply run `codex` to get started.
 
+This checkout is the netsky fork. For fork-local source installs, use
+[`FORK.md`](./FORK.md).
+
 <details>
 <summary>You can also go to the <a href="https://github.com/openai/codex/releases/latest">latest GitHub Release</a> and download the appropriate binary for your platform.</summary>
 

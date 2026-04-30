@@ -24,7 +24,7 @@ codex-core = { workspace = true }
 codex-git-utils = { workspace = true }
 codex-login = { path = "../login" }
 codex-model-provider = { workspace = true }
-codex-tui = { workspace = true }
+codex-tui = { path = "../tui", default-features = false }
 codex-utils-cli = { workspace = true }
 crossterm = { workspace = true, features = ["event-stream"] }
 owo-colors = { workspace = true, features = ["supports-colors"] }

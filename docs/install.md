@@ -12,6 +12,19 @@
 
 The GitHub Release also contains a [DotSlash](https://dotslash-cli.com/) file for the Codex CLI named `codex`. Using a DotSlash file makes it possible to make a lightweight commit to source control to ensure all contributors use the same version of an executable, regardless of what platform they use for development.
 
+### Fork install
+
+This checkout is the netsky fork. To build and install the fork from this
+repository, use:
+
+```bash
+scripts/install-codex-fork.sh
+```
+
+The script installs `codex` to `${CODEX_INSTALL_DIR:-$HOME/.local/bin}`.
+See [`FORK.md`](../FORK.md) for the fork-specific build and rebase
+ritual.
+
 ### Build from source
 
 ```bash

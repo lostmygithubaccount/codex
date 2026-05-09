@@ -8,6 +8,7 @@ codex_rs_dir="$repo_root/codex-rs"
 bin_dir="${CODEX_INSTALL_DIR:-$HOME/.local/bin}"
 bin_path="$bin_dir/codex"
 tmp_bin_path="$bin_path.tmp.$$"
+profile="${CODEX_CARGO_PROFILE:-dev-small}"
 
 cleanup() {
   rm -f "$tmp_bin_path"
@@ -30,15 +31,19 @@ require_command mkdir
 require_command cp
 require_command chmod
 
-step "Building codex-cli from $codex_rs_dir"
+step "Building codex-cli from $codex_rs_dir using profile $profile"
 (
   cd "$codex_rs_dir"
-  cargo build --release -p codex-cli
+  if [ "$profile" = "release" ]; then
+    cargo build --release -p codex-cli
+  else
+    cargo build --profile "$profile" -p codex-cli
+  fi
 )
 
 step "Installing codex to $bin_path"
 mkdir -p "$bin_dir"
-cp "$codex_rs_dir/target/release/codex" "$tmp_bin_path"
+cp "$codex_rs_dir/target/$profile/codex" "$tmp_bin_path"
 chmod 0755 "$tmp_bin_path"
 mv -f "$tmp_bin_path" "$bin_path"
 

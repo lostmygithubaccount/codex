@@ -13,14 +13,51 @@ Patches layered on top of the upstream tag, oldest first:
 
 1. `feat(tui): add filesystem channel support` — add the channel
    subscriber, reply envelopes, docs, demo script, and roundtrip test.
-2. `fix(models): use known GPT-5.5 context windows` — prevent stale
-   remote model metadata from clamping GPT-5.5 variants below their
-   documented context windows.
-3. `fix(core): compact before pending input overflows` — account for
+2. `fix(core): compact before pending input overflows` — account for
    the pending user message before deciding whether to compact.
-4. `build(fork): keep netsky install path buildable` — gate WebRTC
+3. `build(fork): keep netsky install path buildable` — gate WebRTC
    behind a cargo feature, disable it for the fork install path, add
    fork notes, and mark runtime version surfaces as the netsky fork.
+4. `fix(core): compact before steered input overflows` — compact before
+   mid-turn user input is recorded when that pending input would cross
+   the auto-compact limit.
+5. `build(fork): refresh lockfile for v0.130.0` — refresh package
+   versions after rebasing onto the upstream stable tag.
+6. `build(fork): default install to dev-small profile` — avoid the
+   expensive release fat-LTO path for normal local fork installs.
+
+## GPT-5.5 context window
+
+Do not hardcode GPT-5.5 to a 1M context window for Codex ChatGPT-auth
+sessions.
+
+OpenAI advertises `gpt-5.5` in the API with a 1,050,000-token context
+window:
+
+- https://developers.openai.com/api/docs/models/gpt-5.5
+- https://openai.com/index/introducing-gpt-5-5/
+
+That is not the same surface as Codex running through ChatGPT auth. The
+GPT-5.5 launch post says GPT-5.5 in Codex has a 400K context window, and
+the ChatGPT help article describes GPT-5.5 Thinking on Pro as 272K input
++ 128K max output:
+
+- https://help.openai.com/en/articles/11909943-gpt-53-and-52-in-chatgpt
+
+Local probes through this fork's installed `codex` binary confirmed the
+Codex/ChatGPT-auth behavior:
+
+- a single prompt over 1,048,576 characters is rejected by Codex turn
+  start before model inference.
+- with a temporary model catalog forcing `gpt-5.5` to 1,050,000 tokens,
+  cumulative prompts around 259K tokens succeeded.
+- adding roughly another 30K tokens failed with
+  `context_length_exceeded`.
+
+The fork therefore keeps bundled `gpt-5.5` metadata at `272_000` input
+tokens. Raising this should be gated behind an explicit API-key profile
+or a runtime probe that verifies the active provider/auth path actually
+accepts the larger window.
 
 ## Rebuild ritual
 
@@ -32,9 +69,13 @@ scripts/install-codex-fork.sh
 
 That script:
 
-- builds `codex-cli` without default features when WebRTC is not needed
+- builds `codex-cli` with the `dev-small` profile by default
 - installs the binary to `${CODEX_INSTALL_DIR:-$HOME/.local/bin}/codex`
 - prints the installed binary version so the fork marker is visible
+
+Set `CODEX_CARGO_PROFILE=release` when an optimized release binary is
+needed. The upstream release profile uses fat LTO and can take a long
+time to link locally.
 
 Do not install the fork from a stock upstream checkout. Stock upstream
 enables the TUI default features, including `realtime-webrtc`, which
@@ -45,8 +86,8 @@ compile WebRTC:
 
 ```sh
 cd codex-rs
-cargo build --release -p codex-cli
-install -m 0755 target/release/codex ~/.local/bin/codex
+cargo build --profile dev-small -p codex-cli
+install -m 0755 target/dev-small/codex ~/.local/bin/codex
 ```
 
 If realtime WebRTC is explicitly needed, build with default features and
@@ -71,7 +112,7 @@ The fork tracks upstream stable release tags (`rust-vX.Y.Z`, no
 `-alpha.N`). A tagged release is a stable surface; `upstream/main` can
 carry mid-refactor state that breaks our rebase unpredictably.
 
-Current pin: **`rust-v0.129.0`**.
+Current pin: **`rust-v0.130.0`**.
 
 ### Upstream tag bump ritual
 

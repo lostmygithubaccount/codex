@@ -153,15 +153,7 @@ pub(crate) async fn run_turn(
     let auto_compact_limit = model_info.auto_compact_token_limit().unwrap_or(i64::MAX);
     let mut client_session =
         prewarmed_client_session.unwrap_or_else(|| sess.services.model_client.new_session());
-    let pending_input_tokens = if input.is_empty() {
-        0
-    } else {
-        let input_item: ResponseInputItem = ResponseInputItem::from(input.clone());
-        let response_item: ResponseItem = input_item.into();
-        approx_tokens_from_byte_count_i64(estimate_response_item_model_visible_bytes(
-            &response_item,
-        ))
-    };
+    let pending_input_tokens = estimate_user_input_tokens(&input);
     let pre_sampling_compact = match run_pre_sampling_compact(
         &sess,
         &turn_context,
@@ -406,6 +398,26 @@ pub(crate) async fn run_turn(
         } else {
             Vec::new()
         };
+
+        if !pending_input.is_empty() {
+            let reset_client_session = match maybe_run_pending_input_compact(
+                &sess,
+                &turn_context,
+                &mut client_session,
+                &pending_input,
+            )
+            .await
+            {
+                Ok(reset_client_session) => reset_client_session,
+                Err(_) => {
+                    let _ = sess.prepend_pending_input(pending_input).await;
+                    return None;
+                }
+            };
+            if reset_client_session {
+                client_session.reset_websocket_session();
+            }
+        }
 
         let mut blocked_pending_input = false;
         let mut blocked_pending_input_contexts = Vec::new();
@@ -770,6 +782,61 @@ async fn run_pre_sampling_compact(
     Ok(PreSamplingCompactResult {
         reset_client_session: pre_sampling_compacted && reset_client_session,
     })
+}
+
+async fn maybe_run_pending_input_compact(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    client_session: &mut ModelClientSession,
+    pending_input: &[ResponseInputItem],
+) -> CodexResult<bool> {
+    let pending_input_tokens = estimate_response_input_items_tokens(pending_input);
+    if pending_input_tokens == 0 {
+        return Ok(false);
+    }
+
+    let total_usage_tokens = sess
+        .get_total_token_usage()
+        .await
+        .saturating_add(pending_input_tokens);
+    let auto_compact_limit = turn_context
+        .model_info
+        .auto_compact_token_limit()
+        .unwrap_or(i64::MAX);
+
+    if total_usage_tokens < auto_compact_limit {
+        return Ok(false);
+    }
+
+    run_auto_compact(
+        sess,
+        turn_context,
+        client_session,
+        InitialContextInjection::BeforeLastUserMessage,
+        CompactionReason::ContextLimit,
+        CompactionPhase::MidTurn,
+    )
+    .await
+}
+
+fn estimate_user_input_tokens(input: &[UserInput]) -> i64 {
+    if input.is_empty() {
+        return 0;
+    }
+
+    let input_item: ResponseInputItem = ResponseInputItem::from(input.to_vec());
+    estimate_response_input_items_tokens(std::slice::from_ref(&input_item))
+}
+
+fn estimate_response_input_items_tokens(input: &[ResponseInputItem]) -> i64 {
+    input.iter().fold(0, |total, item| {
+        let response_item: ResponseItem = item.clone().into();
+        total.saturating_add(estimate_response_item_tokens(&response_item))
+    })
+}
+
+fn estimate_response_item_tokens(response_item: &ResponseItem) -> i64 {
+    approx_tokens_from_byte_count_i64(estimate_response_item_model_visible_bytes(response_item))
 }
 
 /// Runs pre-sampling compaction against the previous model when switching to a smaller

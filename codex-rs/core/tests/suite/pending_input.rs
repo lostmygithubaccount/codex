@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use codex_core::CodexThread;
+use codex_core::compact::SUMMARIZATION_PROMPT;
 use codex_protocol::AgentPath;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::PermissionProfile;
@@ -61,6 +62,14 @@ fn message_input_texts(body: &Value, role: &str) -> Vec<String> {
         .filter(|span| span.get("type").and_then(Value::as_str) == Some("input_text"))
         .filter_map(|span| span.get("text").and_then(Value::as_str).map(str::to_owned))
         .collect()
+}
+
+fn body_contains_text(body: &Value, text: &str) -> bool {
+    let json_fragment = serde_json::to_string(text)
+        .expect("serialize text to JSON")
+        .trim_matches('"')
+        .to_string();
+    body.to_string().contains(&json_fragment)
 }
 
 fn chunk(event: Value) -> StreamingSseChunk {
@@ -666,6 +675,100 @@ async fn steered_user_input_follows_compact_when_only_the_steer_needs_follow_up(
             .iter()
             .any(|text| text == "second prompt"),
         "steered input should follow compaction without an empty resume request when the model was already done"
+    );
+
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steered_user_input_compacts_before_pending_input_crosses_limit() {
+    let (gate_first_completed_tx, gate_first_completed_rx) = oneshot::channel();
+
+    let first_chunks = vec![
+        chunk(ev_response_created("resp-1")),
+        chunk(ev_message_item_added("msg-1", "")),
+        chunk(ev_output_text_delta("first answer")),
+        chunk(ev_message_item_done("msg-1", "first answer")),
+        gated_chunk(
+            gate_first_completed_rx,
+            vec![ev_completed_with_tokens("resp-1", /*total_tokens*/ 89)],
+        ),
+    ];
+
+    let compact_chunks = vec![
+        chunk(ev_response_created("resp-compact")),
+        chunk(ev_message_item_done("msg-compact", "AUTO_COMPACT_SUMMARY")),
+        chunk(ev_completed_with_tokens(
+            "resp-compact",
+            /*total_tokens*/ 10,
+        )),
+    ];
+
+    let steered_follow_up_chunks = vec![
+        chunk(ev_response_created("resp-steered")),
+        chunk(ev_message_item_done(
+            "msg-steered",
+            "processed steered prompt",
+        )),
+        chunk(ev_completed_with_tokens(
+            "resp-steered",
+            /*total_tokens*/ 20,
+        )),
+    ];
+
+    let (server, _completions) =
+        start_streaming_sse_server(vec![first_chunks, compact_chunks, steered_follow_up_chunks])
+            .await;
+
+    let codex = test_codex()
+        .with_model("gpt-5.4")
+        .with_config(|config| {
+            config.model_provider.name = "OpenAI (test)".to_string();
+            config.model_provider.supports_websockets = false;
+            config.compact_prompt = Some(SUMMARIZATION_PROMPT.to_string());
+            config.model_context_window = Some(100);
+            config.model_auto_compact_token_limit = Some(90);
+        })
+        .build_with_streaming_server(&server)
+        .await
+        .unwrap_or_else(|err| panic!("build streaming Codex test session: {err}"))
+        .codex;
+
+    submit_user_input(&codex, "first prompt").await;
+    wait_for_agent_message(&codex, "first answer").await;
+    steer_user_input(&codex, "SECOND_PROMPT_PUSHES_LIMIT").await;
+    let _ = gate_first_completed_tx.send(());
+
+    wait_for_agent_message(&codex, "processed steered prompt").await;
+    wait_for_turn_complete(&codex).await;
+
+    let requests = server.requests().await;
+    assert_eq!(
+        requests.len(),
+        3,
+        "expected initial request, pending-input compaction, and post-compact follow-up"
+    );
+
+    let compact_body: Value =
+        from_slice(&requests[1]).unwrap_or_else(|err| panic!("parse compact request: {err}"));
+    let steered_body: Value =
+        from_slice(&requests[2]).unwrap_or_else(|err| panic!("parse steered request: {err}"));
+
+    assert!(
+        body_contains_text(&compact_body, SUMMARIZATION_PROMPT),
+        "pending input should trigger compaction before the next sampling request"
+    );
+    assert!(
+        !body_contains_text(&compact_body, "SECOND_PROMPT_PUSHES_LIMIT"),
+        "pending input should stay out of the compaction request"
+    );
+
+    let steered_user_texts = message_input_texts(&steered_body, "user");
+    assert!(
+        steered_user_texts
+            .iter()
+            .any(|text| text == "SECOND_PROMPT_PUSHES_LIMIT"),
+        "post-compaction request should include the pending input"
     );
 
     server.shutdown().await;
